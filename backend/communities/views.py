@@ -72,6 +72,14 @@ class BuildingViewSet(viewsets.ModelViewSet):
                 Sum("rooms__bills__amount", filter=Q(rooms__bills__status__in=[Bill.UNPAID, Bill.OVERDUE])),
                 Value(Decimal("0.00")),
             ),
+            total_overdue_amount=Coalesce(
+                Sum(
+                    "rooms__bills__amount",
+                    filter=Q(rooms__bills__status__in=[Bill.UNPAID, Bill.OVERDUE])
+                    & Q(rooms__bills__due_date__lt=today),
+                ),
+                Value(Decimal("0.00")),
+            ),
         )
 
         queryset = queryset.annotate(

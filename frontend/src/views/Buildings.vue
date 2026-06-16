@@ -42,12 +42,25 @@
               {{ opt.label }}
             </button>
           </div>
+          <div class="filter-group">
+            <span class="filter-label">高欠费阈值(元)：</span>
+            <input
+              type="number"
+              class="threshold-input"
+              v-model.number="highDebtThreshold"
+              min="0"
+              step="100"
+              @change="load"
+              @keyup.enter="load"
+            />
+          </div>
           <button @click="load">刷新</button>
         </div>
       </div>
       <DataTable :columns="buildingColumns" :rows="buildings">
-        <template #cell-total_unpaid_amount="{ row }">
-          <span class="amount unpaid">¥{{ formatAmount(row.total_unpaid_amount) }}</span>
+        <template #cell-display_amount="{ row }">
+          <span v-if="debtFilter === 'overdue'" class="amount overdue">¥{{ formatAmount(row.total_overdue_amount) }}</span>
+          <span v-else class="amount unpaid">¥{{ formatAmount(row.total_unpaid_amount) }}</span>
         </template>
       </DataTable>
 
@@ -69,7 +82,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { propertyApi } from "../api/property";
 import DataTable from "../components/DataTable.vue";
 
@@ -77,6 +90,7 @@ const buildings = ref([]);
 const allBuildings = ref([]);
 const rooms = ref([]);
 const debtFilter = ref("");
+const highDebtThreshold = ref(500);
 const buildingForm = reactive({ name: "", address: "", floor_count: 1, unit_count: 1, manager: "" });
 const roomForm = reactive({ building: "", room_no: "", owner_name: "", phone: "", area: 0 });
 
@@ -87,16 +101,16 @@ const debtFilterOptions = [
   { value: "high_debt", label: "高欠费" }
 ];
 
-const buildingColumns = [
+const buildingColumns = computed(() => [
   { key: "name", label: "楼栋" },
   { key: "address", label: "地址" },
   { key: "manager", label: "楼管员" },
   { key: "room_count", label: "房屋数" },
   { key: "unpaid_room_count", label: "欠费户数" },
   { key: "overdue_room_count", label: "逾期户数" },
-  { key: "high_debt_room_count", label: "高欠费户" },
-  { key: "total_unpaid_amount", label: "欠费总额" }
-];
+  { key: "high_debt_room_count", label: `高欠费户(≥${highDebtThreshold.value}元)` },
+  { key: "display_amount", label: debtFilter.value === "overdue" ? "逾期总额" : "欠费总额" }
+]);
 
 const roomColumns = [
   { key: "building_name", label: "楼栋" },
@@ -122,6 +136,9 @@ async function load() {
   const params = {};
   if (debtFilter.value) {
     params.debt_status = debtFilter.value;
+  }
+  if (highDebtThreshold.value !== null && highDebtThreshold.value !== undefined && highDebtThreshold.value >= 0) {
+    params.high_debt_threshold = highDebtThreshold.value;
   }
   const [buildingData, roomData] = await Promise.all([
     propertyApi.listBuildings(params),
@@ -198,5 +215,19 @@ onMounted(load);
 
 .amount.overdue {
   color: #f5222d;
+}
+
+.threshold-input {
+  width: 100px;
+  padding: 4px 8px;
+  font-size: 13px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.threshold-input:focus {
+  border-color: #1890ff;
 }
 </style>

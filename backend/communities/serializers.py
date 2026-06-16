@@ -31,6 +31,7 @@ class BuildingSerializer(serializers.ModelSerializer):
     overdue_room_count = serializers.IntegerField(read_only=True)
     high_debt_room_count = serializers.IntegerField(read_only=True)
     total_unpaid_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_overdue_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
 
     class Meta:
         model = Building
@@ -47,6 +48,7 @@ class BuildingSerializer(serializers.ModelSerializer):
             "overdue_room_count",
             "high_debt_room_count",
             "total_unpaid_amount",
+            "total_overdue_amount",
             "created_at",
         ]
 
