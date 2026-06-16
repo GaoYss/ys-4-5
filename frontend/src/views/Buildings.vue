@@ -36,7 +36,8 @@
             <button
               v-for="opt in debtFilterOptions"
               :key="opt.value"
-              :class="{ active: debtFilter === opt.value }"
+              :class="{ active: debtFilter === opt.value, disabled: loading }"
+              :disabled="loading"
               @click="setDebtFilter(opt.value)"
             >
               {{ opt.label }}
@@ -47,36 +48,47 @@
             <input
               type="number"
               class="threshold-input"
-              v-model.number="highDebtThreshold"
+              :class="{ 'input-error': thresholdError }"
+              v-model="thresholdInput"
               min="0"
               step="100"
-              @change="load"
-              @keyup.enter="load"
+              :disabled="loading"
+              @change="handleThresholdChange"
+              @keyup.enter="handleThresholdChange"
             />
+            <button @click="load" :disabled="loading">刷新</button>
           </div>
-          <button @click="load">刷新</button>
         </div>
+        <div v-if="thresholdError" class="error-tip">{{ thresholdError }}</div>
       </div>
-      <DataTable :columns="buildingColumns" :rows="buildings">
-        <template #cell-display_amount="{ row }">
-          <span v-if="debtFilter === 'overdue'" class="amount overdue">¥{{ formatAmount(row.total_overdue_amount) }}</span>
-          <span v-else class="amount unpaid">¥{{ formatAmount(row.total_unpaid_amount) }}</span>
-        </template>
-      </DataTable>
 
-      <div class="panel-head section-gap">
-        <h2>房屋档案</h2>
+      <div v-if="loading" class="loading-wrap">
+        <div class="loading-spinner"></div>
+        <span class="loading-text">加载中...</span>
       </div>
-      <DataTable :columns="roomColumns" :rows="rooms">
-        <template #cell-unpaid_amount="{ row }">
-          <span v-if="row.unpaid_amount > 0" class="amount unpaid">¥{{ formatAmount(row.unpaid_amount) }}</span>
-          <span v-else class="amount">-</span>
-        </template>
-        <template #cell-overdue_amount="{ row }">
-          <span v-if="row.overdue_amount > 0" class="amount overdue">¥{{ formatAmount(row.overdue_amount) }}</span>
-          <span v-else class="amount">-</span>
-        </template>
-      </DataTable>
+
+      <template v-else>
+        <DataTable :columns="buildingColumns" :rows="buildings">
+          <template #cell-display_amount="{ row }">
+            <span v-if="debtFilter === 'overdue'" class="amount overdue">¥{{ formatAmount(row.total_overdue_amount) }}</span>
+            <span v-else class="amount unpaid">¥{{ formatAmount(row.total_unpaid_amount) }}</span>
+          </template>
+        </DataTable>
+
+        <div class="panel-head section-gap">
+          <h2>房屋档案</h2>
+        </div>
+        <DataTable :columns="roomColumns" :rows="rooms">
+          <template #cell-unpaid_amount="{ row }">
+            <span v-if="row.unpaid_amount > 0" class="amount unpaid">¥{{ formatAmount(row.unpaid_amount) }}</span>
+            <span v-else class="amount">-</span>
+          </template>
+          <template #cell-overdue_amount="{ row }">
+            <span v-if="row.overdue_amount > 0" class="amount overdue">¥{{ formatAmount(row.overdue_amount) }}</span>
+            <span v-else class="amount">-</span>
+          </template>
+        </DataTable>
+      </template>
     </section>
   </div>
 </template>
@@ -91,6 +103,9 @@ const allBuildings = ref([]);
 const rooms = ref([]);
 const debtFilter = ref("");
 const highDebtThreshold = ref(500);
+const thresholdInput = ref("500");
+const loading = ref(false);
+const thresholdError = ref("");
 const buildingForm = reactive({ name: "", address: "", floor_count: 1, unit_count: 1, manager: "" });
 const roomForm = reactive({ building: "", room_no: "", owner_name: "", phone: "", area: 0 });
 
@@ -127,27 +142,61 @@ function formatAmount(val) {
   return Number(val).toFixed(2);
 }
 
+function validateThreshold() {
+  const val = thresholdInput.value.trim();
+  if (val === "" || val === null || val === undefined) {
+    thresholdError.value = "请输入高欠费阈值";
+    return false;
+  }
+  const num = Number(val);
+  if (isNaN(num)) {
+    thresholdError.value = "请输入有效的数字";
+    return false;
+  }
+  if (num < 0) {
+    thresholdError.value = "阈值不能为负数";
+    return false;
+  }
+  thresholdError.value = "";
+  highDebtThreshold.value = num;
+  return true;
+}
+
+function handleThresholdChange() {
+  if (!validateThreshold()) return;
+  load();
+}
+
 function setDebtFilter(value) {
+  if (loading.value) return;
   debtFilter.value = value;
   load();
 }
 
 async function load() {
-  const params = {};
-  if (debtFilter.value) {
-    params.debt_status = debtFilter.value;
-  }
-  if (highDebtThreshold.value !== null && highDebtThreshold.value !== undefined && highDebtThreshold.value >= 0) {
-    params.high_debt_threshold = highDebtThreshold.value;
-  }
-  const [buildingData, roomData] = await Promise.all([
-    propertyApi.listBuildings(params),
-    propertyApi.listRooms(params)
-  ]);
-  buildings.value = buildingData;
-  rooms.value = roomData;
-  if (!debtFilter.value) {
-    allBuildings.value = buildingData;
+  if (!validateThreshold()) return;
+  loading.value = true;
+  buildings.value = [];
+  rooms.value = [];
+  try {
+    const params = {};
+    if (debtFilter.value) {
+      params.debt_status = debtFilter.value;
+    }
+    if (highDebtThreshold.value !== null && highDebtThreshold.value !== undefined && highDebtThreshold.value >= 0) {
+      params.high_debt_threshold = highDebtThreshold.value;
+    }
+    const [buildingData, roomData] = await Promise.all([
+      propertyApi.listBuildings(params),
+      propertyApi.listRooms(params)
+    ]);
+    buildings.value = buildingData;
+    rooms.value = roomData;
+    if (!debtFilter.value) {
+      allBuildings.value = buildingData;
+    }
+  } finally {
+    loading.value = false;
   }
 }
 
@@ -171,6 +220,7 @@ onMounted(load);
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .filter-group {
@@ -194,7 +244,7 @@ onMounted(load);
   transition: all 0.2s;
 }
 
-.filter-group button:hover {
+.filter-group button:hover:not(:disabled) {
   border-color: #1890ff;
   color: #1890ff;
 }
@@ -203,6 +253,11 @@ onMounted(load);
   background: #1890ff;
   border-color: #1890ff;
   color: #fff;
+}
+
+.filter-group button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .amount {
@@ -229,5 +284,51 @@ onMounted(load);
 
 .threshold-input:focus {
   border-color: #1890ff;
+}
+
+.threshold-input:disabled {
+  background: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.threshold-input.input-error {
+  border-color: #f5222d;
+}
+
+.error-tip {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #f5222d;
+}
+
+.loading-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 0;
+  color: #999;
+  font-size: 14px;
+}
+
+.loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #e0e0e0;
+  border-top-color: #1890ff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: 13px;
+}
+
+.section-gap {
+  margin-top: 24px;
 }
 </style>
