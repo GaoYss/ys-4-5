@@ -2,9 +2,9 @@ import { http, unwrap } from "./http";
 
 export const propertyApi = {
   dashboard: () => http.get("/dashboard/").then(unwrap),
-  listBuildings: () => http.get("/buildings/").then(unwrap),
+  listBuildings: (params = {}) => http.get("/buildings/", { params }).then(unwrap),
   createBuilding: (payload) => http.post("/buildings/", payload).then(unwrap),
-  listRooms: () => http.get("/rooms/").then(unwrap),
+  listRooms: (params = {}) => http.get("/rooms/", { params }).then(unwrap),
   createRoom: (payload) => http.post("/rooms/", payload).then(unwrap),
   listFeeTypes: () => http.get("/fee-types/").then(unwrap),
   createFeeType: (payload) => http.post("/fee-types/", payload).then(unwrap),

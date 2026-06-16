@@ -5,18 +5,50 @@ from .models import Bill, Building, FeeType, Payment, Reminder, Room
 
 class RoomSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(source="building.name", read_only=True)
+    unpaid_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    overdue_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model = Room
-        fields = ["id", "building", "building_name", "room_no", "owner_name", "phone", "area", "is_active", "created_at"]
+        fields = [
+            "id",
+            "building",
+            "building_name",
+            "room_no",
+            "owner_name",
+            "phone",
+            "area",
+            "is_active",
+            "created_at",
+            "unpaid_amount",
+            "overdue_amount",
+        ]
 
 
 class BuildingSerializer(serializers.ModelSerializer):
     room_count = serializers.IntegerField(read_only=True)
+    unpaid_room_count = serializers.IntegerField(read_only=True)
+    overdue_room_count = serializers.IntegerField(read_only=True)
+    high_debt_room_count = serializers.IntegerField(read_only=True)
+    total_unpaid_amount = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
 
     class Meta:
         model = Building
-        fields = ["id", "name", "address", "floor_count", "unit_count", "manager", "remark", "room_count", "created_at"]
+        fields = [
+            "id",
+            "name",
+            "address",
+            "floor_count",
+            "unit_count",
+            "manager",
+            "remark",
+            "room_count",
+            "unpaid_room_count",
+            "overdue_room_count",
+            "high_debt_room_count",
+            "total_unpaid_amount",
+            "created_at",
+        ]
 
 
 class BuildingDetailSerializer(BuildingSerializer):

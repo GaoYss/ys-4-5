@@ -1,5 +1,9 @@
-from django.db.models import Count
+from decimal import Decimal
+
+from django.db.models import Count, Exists, F, OuterRef, Q, Sum, Value
+from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
@@ -16,10 +20,88 @@ from .serializers import (
 )
 from .services import create_overdue_reminders, dashboard_stats, generate_bills, pay_bill
 
+HIGH_DEBT_THRESHOLD = Decimal("500.00")
+
+
+def _annotate_room_debt(queryset):
+    today = timezone.localdate()
+    unpaid_bills = Bill.objects.filter(
+        room=OuterRef("pk"),
+        status__in=[Bill.UNPAID, Bill.OVERDUE],
+    )
+    overdue_bills = Bill.objects.filter(
+        room=OuterRef("pk"),
+        status__in=[Bill.UNPAID, Bill.OVERDUE],
+        due_date__lt=today,
+    )
+    return queryset.annotate(
+        unpaid_amount=Coalesce(Sum("bills__amount", filter=Q(bills__status__in=[Bill.UNPAID, Bill.OVERDUE])), Value(Decimal("0.00"))),
+        overdue_amount=Coalesce(
+            Sum(
+                "bills__amount",
+                filter=Q(bills__status__in=[Bill.UNPAID, Bill.OVERDUE]) & Q(bills__due_date__lt=today),
+            ),
+            Value(Decimal("0.00")),
+        ),
+        has_unpaid=Exists(unpaid_bills),
+        has_overdue=Exists(overdue_bills),
+    )
+
 
 class BuildingViewSet(viewsets.ModelViewSet):
-    queryset = Building.objects.annotate(room_count=Count("rooms")).all()
     serializer_class = BuildingSerializer
+    queryset = Building.objects.all()
+
+    def get_queryset(self):
+        debt_status = self.request.query_params.get("debt_status")
+        high_debt_threshold = Decimal(self.request.query_params.get("high_debt_threshold", HIGH_DEBT_THRESHOLD))
+        today = timezone.localdate()
+
+        queryset = Building.objects.all()
+
+        unpaid_bill_filter = Q(rooms__bills__status__in=[Bill.UNPAID, Bill.OVERDUE])
+        overdue_bill_filter = Q(rooms__bills__status__in=[Bill.UNPAID, Bill.OVERDUE]) & Q(
+            rooms__bills__due_date__lt=today
+        )
+
+        queryset = queryset.annotate(
+            room_count=Count("rooms", distinct=True),
+            unpaid_room_count=Count("rooms", filter=unpaid_bill_filter, distinct=True),
+            overdue_room_count=Count("rooms", filter=overdue_bill_filter, distinct=True),
+            total_unpaid_amount=Coalesce(
+                Sum("rooms__bills__amount", filter=Q(rooms__bills__status__in=[Bill.UNPAID, Bill.OVERDUE])),
+                Value(Decimal("0.00")),
+            ),
+        )
+
+        queryset = queryset.annotate(
+            high_debt_room_count=Count(
+                "rooms",
+                filter=Q(
+                    rooms__pk__in=Room.objects.annotate(
+                        room_unpaid=Coalesce(
+                            Sum(
+                                "bills__amount",
+                                filter=Q(bills__status__in=[Bill.UNPAID, Bill.OVERDUE]),
+                            ),
+                            Value(Decimal("0.00")),
+                        )
+                    )
+                    .filter(room_unpaid__gte=high_debt_threshold)
+                    .values("pk")
+                ),
+                distinct=True,
+            )
+        )
+
+        if debt_status == "unpaid":
+            queryset = queryset.filter(unpaid_room_count__gt=0)
+        elif debt_status == "overdue":
+            queryset = queryset.filter(overdue_room_count__gt=0)
+        elif debt_status == "high_debt":
+            queryset = queryset.filter(high_debt_room_count__gt=0)
+
+        return queryset.order_by("name")
 
     def get_serializer_class(self):
         if self.action == "retrieve":
@@ -28,14 +110,27 @@ class BuildingViewSet(viewsets.ModelViewSet):
 
 
 class RoomViewSet(viewsets.ModelViewSet):
-    queryset = Room.objects.select_related("building").all()
     serializer_class = RoomSerializer
+    queryset = Room.objects.all()
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = Room.objects.select_related("building").all()
+        queryset = _annotate_room_debt(queryset)
+
         building = self.request.query_params.get("building")
         if building:
             queryset = queryset.filter(building_id=building)
+
+        debt_status = self.request.query_params.get("debt_status")
+        high_debt_threshold = Decimal(self.request.query_params.get("high_debt_threshold", HIGH_DEBT_THRESHOLD))
+
+        if debt_status == "unpaid":
+            queryset = queryset.filter(has_unpaid=True)
+        elif debt_status == "overdue":
+            queryset = queryset.filter(has_overdue=True)
+        elif debt_status == "high_debt":
+            queryset = queryset.filter(unpaid_amount__gte=high_debt_threshold)
+
         return queryset
 
 

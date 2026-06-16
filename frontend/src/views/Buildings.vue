@@ -16,7 +16,7 @@
         <label>所属楼栋
           <select v-model="roomForm.building" required>
             <option value="" disabled>请选择</option>
-            <option v-for="building in buildings" :key="building.id" :value="building.id">{{ building.name }}</option>
+            <option v-for="building in allBuildings" :key="building.id" :value="building.id">{{ building.name }}</option>
           </select>
         </label>
         <label>房号<input v-model="roomForm.room_no" required placeholder="1-101" /></label>
@@ -30,14 +30,40 @@
     <section class="panel">
       <div class="panel-head">
         <h2>楼栋列表</h2>
-        <button @click="load">刷新</button>
+        <div class="filter-bar">
+          <div class="filter-group">
+            <span class="filter-label">欠费筛选：</span>
+            <button
+              v-for="opt in debtFilterOptions"
+              :key="opt.value"
+              :class="{ active: debtFilter === opt.value }"
+              @click="setDebtFilter(opt.value)"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+          <button @click="load">刷新</button>
+        </div>
       </div>
-      <DataTable :columns="buildingColumns" :rows="buildings" />
+      <DataTable :columns="buildingColumns" :rows="buildings">
+        <template #cell-total_unpaid_amount="{ row }">
+          <span class="amount unpaid">¥{{ formatAmount(row.total_unpaid_amount) }}</span>
+        </template>
+      </DataTable>
 
       <div class="panel-head section-gap">
         <h2>房屋档案</h2>
       </div>
-      <DataTable :columns="roomColumns" :rows="rooms" />
+      <DataTable :columns="roomColumns" :rows="rooms">
+        <template #cell-unpaid_amount="{ row }">
+          <span v-if="row.unpaid_amount > 0" class="amount unpaid">¥{{ formatAmount(row.unpaid_amount) }}</span>
+          <span v-else class="amount">-</span>
+        </template>
+        <template #cell-overdue_amount="{ row }">
+          <span v-if="row.overdue_amount > 0" class="amount overdue">¥{{ formatAmount(row.overdue_amount) }}</span>
+          <span v-else class="amount">-</span>
+        </template>
+      </DataTable>
     </section>
   </div>
 </template>
@@ -48,27 +74,64 @@ import { propertyApi } from "../api/property";
 import DataTable from "../components/DataTable.vue";
 
 const buildings = ref([]);
+const allBuildings = ref([]);
 const rooms = ref([]);
+const debtFilter = ref("");
 const buildingForm = reactive({ name: "", address: "", floor_count: 1, unit_count: 1, manager: "" });
 const roomForm = reactive({ building: "", room_no: "", owner_name: "", phone: "", area: 0 });
+
+const debtFilterOptions = [
+  { value: "", label: "全部" },
+  { value: "unpaid", label: "欠费" },
+  { value: "overdue", label: "逾期" },
+  { value: "high_debt", label: "高欠费" }
+];
+
 const buildingColumns = [
   { key: "name", label: "楼栋" },
   { key: "address", label: "地址" },
-  { key: "floor_count", label: "楼层" },
-  { key: "unit_count", label: "单元" },
   { key: "manager", label: "楼管员" },
-  { key: "room_count", label: "房屋数" }
+  { key: "room_count", label: "房屋数" },
+  { key: "unpaid_room_count", label: "欠费户数" },
+  { key: "overdue_room_count", label: "逾期户数" },
+  { key: "high_debt_room_count", label: "高欠费户" },
+  { key: "total_unpaid_amount", label: "欠费总额" }
 ];
+
 const roomColumns = [
   { key: "building_name", label: "楼栋" },
   { key: "room_no", label: "房号" },
   { key: "owner_name", label: "业主" },
   { key: "phone", label: "电话" },
-  { key: "area", label: "面积" }
+  { key: "area", label: "面积" },
+  { key: "unpaid_amount", label: "欠费金额" },
+  { key: "overdue_amount", label: "逾期金额" }
 ];
 
+function formatAmount(val) {
+  if (val === null || val === undefined) return "0.00";
+  return Number(val).toFixed(2);
+}
+
+function setDebtFilter(value) {
+  debtFilter.value = value;
+  load();
+}
+
 async function load() {
-  [buildings.value, rooms.value] = await Promise.all([propertyApi.listBuildings(), propertyApi.listRooms()]);
+  const params = {};
+  if (debtFilter.value) {
+    params.debt_status = debtFilter.value;
+  }
+  const [buildingData, roomData] = await Promise.all([
+    propertyApi.listBuildings(params),
+    propertyApi.listRooms(params)
+  ]);
+  buildings.value = buildingData;
+  rooms.value = roomData;
+  if (!debtFilter.value) {
+    allBuildings.value = buildingData;
+  }
 }
 
 async function saveBuilding() {
@@ -85,3 +148,55 @@ async function saveRoom() {
 
 onMounted(load);
 </script>
+
+<style scoped>
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-label {
+  font-size: 13px;
+  color: #666;
+}
+
+.filter-group button {
+  padding: 4px 12px;
+  font-size: 13px;
+  border: 1px solid #d9d9d9;
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-group button:hover {
+  border-color: #1890ff;
+  color: #1890ff;
+}
+
+.filter-group button.active {
+  background: #1890ff;
+  border-color: #1890ff;
+  color: #fff;
+}
+
+.amount {
+  font-weight: 500;
+}
+
+.amount.unpaid {
+  color: #fa8c16;
+}
+
+.amount.overdue {
+  color: #f5222d;
+}
+</style>
